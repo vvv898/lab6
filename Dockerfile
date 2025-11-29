@@ -1,7 +1,7 @@
 # Dockerfile
 
 # Використовуємо офіційний образ Java 17
-FROM openjdk:17-jdk-slim as builder
+FROM openjdk:17-jre-slim
 
 # Встановлюємо робочу директорію
 WORKDIR /app
