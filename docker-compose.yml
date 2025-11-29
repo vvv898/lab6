@@ -22,7 +22,6 @@ services:
 
   app:
     build: .
-    image: library-app:latest
     container_name: library-app
     depends_on:
       mysql:
