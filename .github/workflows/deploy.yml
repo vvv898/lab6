@@ -23,74 +23,26 @@ jobs:
         distribution: 'temurin'
         cache: 'maven'
 
-    - name: Build and Run Tests
+    - name: Build Project (Skip Tests)
       run: |
-        # Запускаємо з пропуском тестів, оскільки інтеграційний тест потребує Testcontainers
-        # які можуть не працювати коректно у середовищі GitHub Actions без додаткового налаштування Docker.
-        # В ідеалі, тести мають запускатися, але для спрощення CI/CD на EC2, пропускаємо їх.
-        # run: mvn clean install
+        # Складання JAR файлу
         mvn clean package -DskipTests
       
-    # 2. Створення Docker Образу Застосунку
-    - name: Build Docker Image
-      run: |
-        # Створюємо простий Dockerfile (ПОТРІБНО ДОДАТИ У ВАШ КОРЕНЕВИЙ КАТАЛОГ)
-        docker build -t library-app:latest .
+    # 2. Деплой на EC2 (CD)
 
-    # 3. Деплой на EC2 (CD)
-    - name: Deploy to EC2 via SSH
-      uses: appleboy/ssh-action@v1.0.3
-      with:
-        host: ${{ secrets.SSH_HOST }}
-        username: ${{ secrets.SSH_USER }}
-        key: ${{ secrets.SSH_PRIVATE_KEY }}
-        script: |
-          # 1. Створення папки проекту, якщо її немає
-          mkdir -p ~/app/library
-          
-          # 2. Зупинка та видалення попередніх контейнерів
-          echo "Stopping existing containers..."
-          docker-compose -f ~/app/library/docker-compose.yml down || true
-          
-          # 3. Видалення попереднього проекту
-          rm -rf ~/app/library/*
-          
-          # 4. Копіювання нових файлів з репозиторію
-          echo "Cloning the latest code..."
-          # Замість git clone, оскільки ми вже на сервері,
-          # ми скопіюємо потрібні файли з робочої директорії, де виконується action,
-          # або використаємо git clone, якщо це окремий крок.
-          # Оскільки appleboy/ssh-action не копіює файли за замовчуванням,
-          # використовуємо окрему дію для копіювання:
-          
-          # Якщо ви хочете використовувати appleboy/ssh-action для scp
-          # Цей крок буде виконано у наступному кроці, а не тут.
-          # Для простоти, ми використаємо `git clone` на сервері:
-          
-          # На даний момент ми просто закоментуємо цей крок і перейдемо до scp
-          # або, краще, використаємо іншу дію.
-          
-          # Використовуємо docker-compose, який завантажить образ.
-          
-          # Створення файлів конфігурації (Dockerfile, docker-compose.yml)
-          # Звичайно, ці файли мають бути скопійовані, а не створені тут
-          
-          # **ПРИМІТКА:** Спрощений підхід: копіюємо файли в наступному кроці
-          
-          echo "Deployment script finished successfully."
-
-    # 4. Копіювання файлів на EC2
-    - name: Copy files to EC2
+    # 2.1 Копіювання файлів на EC2
+    - name: Copy files to EC2 (JAR, Docker Compose, Dockerfile)
       uses: appleboy/scp-action@v0.1.7
       with:
         host: ${{ secrets.SSH_HOST }}
         username: ${{ secrets.SSH_USER }}
         key: ${{ secrets.SSH_PRIVATE_KEY }}
-        source: "target/*.jar,docker-compose.yml,Dockerfile" # Копіюємо JAR та Docker-файли
+        # Копіюємо свіжозібраний JAR, Docker Compose та Dockerfile
+        source: "target/library-0.0.1-SNAPSHOT.jar,docker-compose.yml,Dockerfile" 
         target: "~/app/library"
         
-    # 5. Запуск Docker Compose на EC2
-    - name: Run Docker Compose
+    # 2.2 Запуск Docker Compose на EC2
+    - name: Deploy and Run Docker Compose
       uses: appleboy/ssh-action@v1.0.3
       with:
         host: ${{ secrets.SSH_HOST }}
@@ -98,12 +50,17 @@ jobs:
         key: ${{ secrets.SSH_PRIVATE_KEY }}
         script: |
           cd ~/app/library
-          echo "Building new image on EC2..."
-          # Перебудовуємо образ на сервері, використовуючи свіжоскопійований JAR
+          
+          echo "Stopping and removing previous containers..."
+          # Зупиняємо попередній запуск (ignore errors if not running)
+          docker-compose down || true
+          
+          echo "Building new image on EC2 using local Dockerfile..."
+          # Перебудовуємо образ на сервері, використовуючи скопійовані файли
           docker build -t library-app:latest .
           
           echo "Starting application with Docker Compose..."
-          # Запуск застосунку та MySQL
+          # Запуск застосунку та MySQL у фоновому режимі
           docker-compose up -d
           
           echo "Deployment complete! Application is running on port 8080."
