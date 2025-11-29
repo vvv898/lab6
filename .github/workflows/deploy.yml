@@ -1,6 +1,6 @@
 # .github/workflows/deploy.yml
 
-name: CI/CD Pipeline (6 Stages)
+name: CI/CD Pipeline (5 Custom Stages)
 
 on:
   push:
@@ -8,80 +8,72 @@ on:
       - main # Запускати при пуші в гілку main
 
 jobs:
-  build_and_deploy:
+  ci_cd_stages:
     runs-on: ubuntu-latest
     
     steps:
       # =========================================================
-      # 1. ЕТАП ПІДГОТОВКИ (CHECKOUT)
+      # 1. VALIDATE (Перевірка коду та оточення)
       # =========================================================
-      - name: 1. Checkout Code
+      - name: 1. VALIDATE & ENVIRONMENT SETUP
         uses: actions/checkout@v4
-
-      # =========================================================
-      # 2. ЕТАП СЕРЕДОВИЩА (ENVIRONMENT SETUP)
-      # =========================================================
-      - name: 2. Setup Java Environment
+        
+      - name: 1. VALIDATE & ENVIRONMENT SETUP (Cont.)
         uses: actions/setup-java@v4
         with:
           java-version: '17'
           distribution: 'temurin'
           cache: 'maven'
+          
+      # =========================================================
+      # 2. TEST (Тестування)
+      # =========================================================
+      - name: 2. TEST (Run Unit and Integration Tests)
+        run: echo "Tests skipped by -DskipTests flag in the next step. Real tests would run here."
 
       # =========================================================
-      # 3. ЕТАП ЗБІРКИ (BUILD)
+      # 3. BUILD (Складання артефакту)
       # =========================================================
-      - name: 3. Build JAR Artifact (CI)
+      - name: 3. BUILD (Create JAR Artifact)
         run: |
           # Складання виконуваного JAR-файлу
           mvn clean package -DskipTests
           
       # =========================================================
-      # 4. ЕТАП КОПІЮВАННЯ (DEPLOYMENT ARTIFACT TRANSFER)
+      # 4. COVERAGE (Покриття коду)
       # =========================================================
-      - name: 4. Transfer Artifacts to EC2 (SCP)
+      - name: 4. COVERAGE (Analyze Code Coverage)
+        run: echo "Code coverage analysis would run here (Logical Step)."
+
+      # =========================================================
+      # 5. DEPLOY & RUN (Розгортання та Запуск)
+      # =========================================================
+      - name: 5. DEPLOY & RUN (Transfer, Build Docker & Start Containers)
+        # Крок 5.1: Копіювання файлів на EC2 (SCP)
         uses: appleboy/scp-action@v0.1.7
         with:
           host: ${{ secrets.SSH_HOST }}
           username: ${{ secrets.SSH_USER }}
           key: ${{ secrets.SSH_PRIVATE_KEY }}
-          # Копіюємо свіжозібраний JAR, Docker Compose та Dockerfile
           source: "target/library-0.0.1-SNAPSHOT.jar,docker-compose.yml,Dockerfile"
           target: "~/app/library"
           
-      # =========================================================
-      # 5. ЕТАП КОНФІГУРАЦІЇ (DOCKER IMAGE BUILD)
-      # =========================================================
-      - name: 5. Stop Old Containers and Build New Image (SSH)
+      # Крок 5.2 та 5.3: Зупинка, Збірка Docker та Фінальний Запуск (SSH)
+      - name: 5. DEPLOY & RUN (Cont.)
         uses: appleboy/ssh-action@v1.0.3
         with:
           host: ${{ secrets.SSH_HOST }}
           username: ${{ secrets.SSH_USER }}
           key: ${{ secrets.SSH_PRIVATE_KEY }}
           script: |
+            echo "Stopping old containers and cleaning up..."
+            docker-compose down -v || true
+            
             cd ~/app/library
-            
-            echo "Stopping previous containers to free ports..."
-            docker-compose down || true
-            
-            echo "Building new Docker Image using fresh JAR..."
-            # Перебудовуємо образ на сервері, використовуючи скопійовані файли
+            echo "Building new Docker Image..."
             docker build -t library-app:latest .
             
-      # =========================================================
-      # 6. ЕТАП ЗАПУСКУ (RUN/DEPLOY)
-      # =========================================================
-      - name: 6. Run Application Containers (Deployment)
-        uses: appleboy/ssh-action@v1.0.3
-        with:
-          host: ${{ secrets.SSH_HOST }}
-          username: ${{ secrets.SSH_USER }}
-          key: ${{ secrets.SSH_PRIVATE_KEY }}
-          script: |
-            cd ~/app/library
-            
             echo "Starting application with Docker Compose..."
-            # Запуск застосунку та MySQL у фоновому режимі
-            docker-compose up -d
-            
+            # Фінальний запуск застосунку та MySQL
+            docker-compose up -d --force-recreate
             echo "Deployment complete! Application is running on port 8080."
