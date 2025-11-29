@@ -1,6 +1,7 @@
-# .github/workflows/deploy.yml
 
-name: CI/CD Pipeline (5 Separate Jobs)
+# .github/workflows/deploy.yml 
+
+name: CI/CD Pipeline
 
 on:
   push:
@@ -8,128 +9,59 @@ on:
       - main # Запускати при пуші в гілку main
 
 jobs:
-  # =========================================================
-  # 1. VALIDATE
-  # =========================================================
-  validate:
+  build_and_deploy:
     runs-on: ubuntu-latest
+    
     steps:
-      - name: 1. Checkout Code
-        uses: actions/checkout@v4
+    - name: Checkout Code
+      uses: actions/checkout@v4
+
+    # 1. Складання та Тестування (CI)
+    - name: Set up JDK 17
+      uses: actions/setup-java@v4
+      with:
+        java-version: '17'
+        distribution: 'temurin'
+        cache: 'maven'
+
+    - name: Build Project (Skip Tests)
+      run: |
+        # Складання JAR файлу
+        mvn clean package -DskipTests
+      
+    # 2. Деплой на EC2 (CD)
+
+    # 2.1 Копіювання файлів на EC2
+    - name: Copy files to EC2 (JAR, Docker Compose, Dockerfile)
+      uses: appleboy/scp-action@v0.1.7
+      with:
+        host: ${{ secrets.SSH_HOST }}
+        username: ${{ secrets.SSH_USER }}
+        key: ${{ secrets.SSH_PRIVATE_KEY }}
+        # Копіюємо свіжозібраний JAR, Docker Compose та Dockerfile
+        source: "target/library-0.0.1-SNAPSHOT.jar,docker-compose.yml,Dockerfile" 
+        target: "~/app/library"
         
-      - name: 2. Setup Java Environment
-        uses: actions/setup-java@v4
-        with:
-          java-version: '17'
-          distribution: 'temurin'
-          cache: 'maven'
-
-  # =========================================================
-  # 2. TEST
-  # =========================================================
-  test:
-    needs: validate
-    runs-on: ubuntu-latest
-    steps:
-      - name: 1. Download Code Artifacts
-        uses: actions/checkout@v4
-        
-      - name: 2. Run Tests
-        run: echo "Tests skipped in this configuration. Run 'mvn test' here."
-        
-  # =========================================================
-  # 3. BUILD (Складання JAR ТА DOCKER IMAGE PUSH)
-  # =========================================================
-  build:
-    needs: test
-    runs-on: ubuntu-latest
-    steps:
-      - name: 1. Download Code Artifacts
-        uses: actions/checkout@v4
-        
-      - name: 2. Setup Java Environment
-        uses: actions/setup-java@v4
-        with:
-          java-version: '17'
-          distribution: 'temurin'
-          cache: 'maven'
-
-      - name: 3. Create JAR Artifact
-        run: mvn clean package -DskipTests
+    # 2.2 Запуск Docker Compose на EC2
+    - name: Deploy and Run Docker Compose
+      uses: appleboy/ssh-action@v1.0.3
+      with:
+        host: ${{ secrets.SSH_HOST }}
+        username: ${{ secrets.SSH_USER }}
+        key: ${{ secrets.SSH_PRIVATE_KEY }}
+        script: |
+          cd ~/app/library
           
-      # ВИПРАВЛЕННЯ: Прямий Login та Build/Push в одному кроці для стабільності
-      - name: 4. Docker Login, Build and Push Image
-        uses: docker/login-action@v3
-        with:
-          username: ${{ secrets.DOCKER_USERNAME }}
-          password: ${{ secrets.DOCKER_PASSWORD }}
+          echo "Stopping and removing previous containers..."
+          # Зупиняємо попередній запуск (ignore errors if not running)
+          docker-compose down || true
           
-      - uses: docker/build-push-action@v5
-        with:
-          context: .
-          push: true
-          tags: ${{ secrets.DOCKER_USERNAME }}/library-app:latest 
-
-      - name: 5. Upload JAR Artifact
-        uses: actions/upload-artifact@v4
-        with:
-          name: library-jar-artifact
-          path: target/library-0.0.1-SNAPSHOT.jar
-
-  # =========================================================
-  # 4. COVERAGE
-  # =========================================================
-  coverage:
-    needs: build
-    runs-on: ubuntu-latest
-    steps:
-      - name: 1. Analyze Code Coverage
-        run: echo "Code coverage analysis would run here."
-
-  # =========================================================
-  # 5. DEPLOY & RUN (Розгортання та Запуск)
-  # =========================================================
-  deploy_run:
-    needs: coverage
-    runs-on: ubuntu-latest
-    steps:
-      # 5.1: Відновлення JAR-артефакту
-      - name: 1. Download JAR Artifact
-        uses: actions/download-artifact@v4
-        with:
-          name: library-jar-artifact
-          path: target/
-
-      # 5.2: Копіювання файлів на EC2 (SCP)
-      - name: 2. Transfer Artifacts to EC2 (SCP)
-        uses: appleboy/scp-action@v0.1.7
-        with:
-          host: ${{ secrets.SSH_HOST }}
-          username: ${{ secrets.SSH_USER }}
-          key: ${{ secrets.SSH_PRIVATE_KEY }}
-          source: "target/library-0.0.1-SNAPSHOT.jar,docker-compose.yml,Dockerfile"
-          target: "~/app/library"
+          echo "Building new image on EC2 using local Dockerfile..."
+          # Перебудовуємо образ на сервері, використовуючи скопійовані файли
+          docker build -t library-app:latest .
           
-      # 5.3: Зупинка, Збірка Docker та Фінальний Запуск (SSH)
-      - name: 3. Deploy and Run Containers (SSH)
-        uses: appleboy/ssh-action@v1.0.3
-        with:
-          host: ${{ secrets.SSH_HOST }}
-          username: ${{ secrets.SSH_USER }}
-          key: ${{ secrets.SSH_PRIVATE_KEY }}
-          script: |
-            echo "1. Docker Login on EC2 for pull..."
-            # ПОВТОРНИЙ LOGIN НА EC2 ДЛЯ PULL
-            docker login -u ${{ secrets.DOCKER_USERNAME }} -p ${{ secrets.DOCKER_PASSWORD }}
+          echo "Starting application with Docker Compose..."
+          # Запуск застосунку та MySQL у фоновому режимі
+          docker-compose up -d
           
-            echo "2. Pulling and running application..."
-            cd ~/app/library
-            docker-compose down -v || true
-            
-            # 3. PULLING (тепер образ береться з Registry)
-            docker pull ${{ secrets.DOCKER_USERNAME }}/library-app:latest
-            docker tag ${{ secrets.DOCKER_USERNAME }}/library-app:latest library-app:latest
-
-            echo "Starting application with Docker Compose..."
-            docker-compose up -d --force-recreate
-            echo "Deployment complete! Application is running on port 8080."
+          echo "Deployment complete! Application is running on port 8080."
