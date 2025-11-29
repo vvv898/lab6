@@ -5,7 +5,7 @@ name: CI/CD Pipeline (5 Separate Jobs)
 on:
   push:
     branches:
-      - main 
+      - main # Запускати при пуші в гілку main
 
 jobs:
   # =========================================================
@@ -35,8 +35,8 @@ jobs:
         uses: actions/checkout@v4
         
       - name: 2. Run Tests
-        # В оригінальній конфігурації тести були пропущені, тут логічний крок
-        run: echo "Tests skipped by -DskipTests flag in the next job. Real tests run here."
+        # В оригінальній конфігурації тести пропускалися. Тут логічний етап.
+        run: echo "Tests skipped in this configuration. Run 'mvn test' here."
         
   # =========================================================
   # 3. BUILD (Складання артефакту)
@@ -60,6 +60,12 @@ jobs:
           # Складання виконуваного JAR-файлу
           mvn clean package -DskipTests
           
+      - name: 4. Upload JAR Artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: library-jar-artifact
+          path: target/library-0.0.1-SNAPSHOT.jar # Шлях до зібраного JAR
+
   # =========================================================
   # 4. COVERAGE (Покриття коду)
   # =========================================================
@@ -77,27 +83,36 @@ jobs:
     needs: coverage # Залежить від успішного завершення coverage
     runs-on: ubuntu-latest
     steps:
-      # 5.1: Копіювання файлів на EC2 (SCP)
-      - name: 1. Transfer Artifacts to EC2 (SCP)
+      # 5.1: Відновлення JAR-артефакту
+      - name: 1. Download JAR Artifact
+        uses: actions/download-artifact@v4
+        with:
+          name: library-jar-artifact
+          path: target/ # Розпакує JAR у target/
+
+      # 5.2: Копіювання файлів на EC2 (SCP)
+      - name: 2. Transfer Artifacts to EC2 (SCP)
         uses: appleboy/scp-action@v0.1.7
         with:
           host: ${{ secrets.SSH_HOST }}
           username: ${{ secrets.SSH_USER }}
           key: ${{ secrets.SSH_PRIVATE_KEY }}
+          # Копіюємо JAR, Docker Compose та Dockerfile (тепер JAR доступний)
           source: "target/library-0.0.1-SNAPSHOT.jar,docker-compose.yml,Dockerfile"
           target: "~/app/library"
           
-      # 5.2: Зупинка, Збірка Docker та Фінальний Запуск (SSH)
-      - name: 2. Stop Old, Build New, and Start Containers (SSH)
+      # 5.3: Зупинка, Збірка Docker та Фінальний Запуск (SSH)
+      - name: 3. Deploy and Run Containers (SSH)
         uses: appleboy/ssh-action@v1.0.3
         with:
           host: ${{ secrets.SSH_HOST }}
           username: ${{ secrets.SSH_USER }}
           key: ${{ secrets.SSH_PRIVATE_KEY }}
           script: |
+            echo "Stopping old containers..."
             docker-compose down -v || true
-            cd ~/app/library
             
+            cd ~/app/library
             echo "Building new Docker Image..."
             docker build -t library-app:latest .
             
