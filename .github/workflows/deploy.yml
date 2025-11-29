@@ -4,17 +4,15 @@ on:
   push:
     branches:
       - main
-      - feature/** # Запускати CI на всіх feature-гілках
-  pull_request:
+      - feature/** pull_request:
     branches:
       - main
 
 env:
-  # Налаштування пам'яті для Maven
   MAVEN_OPTS: -Xmx1024m 
 
 jobs:
-  # 1. КРОК: Перевірка коду (Maven Validate)
+  # 1. КРОК: Перевірка коду
   validate_code:
     name: 1. Validate Code
     runs-on: ubuntu-latest
@@ -26,14 +24,15 @@ jobs:
           distribution: 'temurin'
           java-version: '17'
       - name: Maven Validate
-        # Виконання: mvn clean validate
         run: mvn -B clean validate
 
+# ----------------------------------------------------
+  
   # 2. КРОК: Юніт-тести та звітність
   unit_tests:
     name: 2. Run Unit Tests & Collect Reports
     runs-on: ubuntu-latest
-    needs: validate_code # Залежність: 1
+    needs: validate_code 
     steps:
       - uses: actions/checkout@v4
       - name: Set up JDK 17
@@ -42,7 +41,6 @@ jobs:
           distribution: 'temurin'
           java-version: '17'
       - name: Run Unit Tests (Skip ITs)
-        # Виконання: mvn test -DskipITs=true
         run: mvn -B -DskipITs=true test
       - name: Upload Surefire Reports (Unit Tests)
         uses: actions/upload-artifact@v4
@@ -50,11 +48,13 @@ jobs:
           name: surefire-reports
           path: target/surefire-reports
 
+# ----------------------------------------------------
+  
   # 3. КРОК: Складання артефакту (JAR-файлу)
   package_application:
     name: 3. Package Application
     runs-on: ubuntu-latest
-    needs: unit_tests # Залежність: 2
+    needs: unit_tests 
     steps:
       - uses: actions/checkout@v4
       - name: Set up JDK 17
@@ -63,21 +63,20 @@ jobs:
           distribution: 'temurin'
           java-version: '17'
       - name: Maven Package
-        # Виконання: mvn package -DskipTests
         run: mvn -B -DskipTests package
       - name: Upload Application JAR
-        # Збереження JAR як артефакт для кроку 5
         uses: actions/upload-artifact@v4
         with:
           name: app-jar
           path: target/*.jar
 
+# ----------------------------------------------------
+  
   # 4. КРОК: Інтеграційні тести (з Testcontainers) та Звіт JaCoCo
   integration_tests:
     name: 4. Run Integration Tests (with Testcontainers)
     runs-on: ubuntu-latest
-    needs: package_application # Залежність: 3
-    # Налаштування Docker-in-Docker для Testcontainers
+    needs: package_application 
     services:
       docker:
         image: docker:24-dind
@@ -98,7 +97,6 @@ jobs:
           distribution: 'temurin'
           java-version: '17'
       - name: Run Integration Tests (Failsafe & JaCoCo)
-        # Виконання: mvn verify (запускає інтеграційні тести та генерує звіт JaCoCo)
         run: mvn -B verify
       - name: Upload Failsafe Reports (ITs)
         uses: actions/upload-artifact@v4
@@ -106,24 +104,23 @@ jobs:
           name: failsafe-reports
           path: target/failsafe-reports
       - name: Upload JaCoCo Code Coverage Report
-        # Збереження звіту про покриття коду тестами (вимога 'е')
         uses: actions/upload-artifact@v4
         with:
           name: jacoco-coverage-report
           path: target/site/jacoco
 
+# ----------------------------------------------------
+
   # 5. КРОК: Розгортання на віддаленому сервері (CD)
   deploy_to_server:
     name: 5. Deploy to remote server
     runs-on: ubuntu-latest
-    # Залежність: від 3 та 4 (успішна збірка та успішне тестування)
     needs: [package_application, integration_tests]
-    # УМОВА РОЗГОРТАННЯ: Тільки при пуші/злитті в основну гілку 'main' (вимога 'f')
+    # Умова для розгортання: тільки на гілку main
     if: github.ref == 'refs/heads/main'
     steps:
       - uses: actions/checkout@v4
       - name: Download Application JAR
-        # Завантаження артефакту з кроку 3
         uses: actions/download-artifact@v4
         with:
           name: app-jar
@@ -138,10 +135,9 @@ jobs:
           ssh-keyscan -H "${{ secrets.DEPLOY_HOST }}" >> ~/.ssh/known_hosts
       
       - name: Upload JAR to Server
-        # Копіювання файлу на проміжний шлях
         run: scp -o StrictHostKeyChecking=no artifact/*.jar ${{ secrets.DEPLOY_USER}}@${{ secrets.DEPLOY_HOST}}:${{ secrets.DEPLOY_PATH }}
       
-      - name: Move JAR and Restart Service (Fixed SSH command)
-        # Виправлена команда SSH для обробки sudo та послідовності команд
+      # Виправлена команда SSH: використовуємо 'bash -c' та -tt для стабільності
+      - name: Move JAR and Restart Service
         run: ssh -tt -o StrictHostKeyChecking=no ${{ secrets.DEPLOY_USER}}@${{ secrets.DEPLOY_HOST}} \
         "bash -c 'sudo mv ${{ secrets.DEPLOY_PATH }}/*.jar /opt/java/webapps/library-app.jar && sudo systemctl restart library-app.service'"
