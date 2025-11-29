@@ -1,20 +1,18 @@
-# ---------- build stage ----------
-FROM maven:3.8.7-eclipse-temurin-17 as build
+# Dockerfile
 
-WORKDIR /build
-COPY pom.xml /build/
-RUN mvn -q -f /build/pom.xml dependency:go-offline
+# Використовуємо офіційний образ Java 17
+FROM openjdk:17-jdk-slim as builder
 
-COPY src /build/src
-RUN mvn -q -f /build/pom.xml -DskipTests package
+# Встановлюємо робочу директорію
+WORKDIR /app
 
-# ---------- run stage ----------
-FROM eclipse-temurin:17-jre
+# Копіюємо зібраний JAR-файл
+# Назва файлу залежить від pom.xml: artifactId-version.jar
+# У вашому випадку це library-0.0.1-SNAPSHOT.jar
+COPY target/library-0.0.1-SNAPSHOT.jar app.jar
 
-ENV JAVA_OPTS="-Djava.security.egd=file:/dev/./urandom"
-
-COPY --from=build /build/target/*.jar /app/library-app.jar
-
+# Визначаємо порт для запуску
 EXPOSE 8080
 
-ENTRYPOINT [ "sh", "-c", "java $JAVA_OPTS -jar /app/library-app.jar" ]
+# Точка входу: запуск Spring Boot застосунку
+ENTRYPOINT ["java", "-jar", "app.jar"]
