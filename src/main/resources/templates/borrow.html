@@ -1,0 +1,21 @@
+<!DOCTYPE html>
+<html xmlns:th="http://www.thymeleaf.org">
+<head><meta charset="UTF-8"><title>Взяти книгу</title></head>
+<body>
+<h1>Взяти книгу</h1>
+<form action="/borrow" method="post">
+  Читач:<br>
+  <select name="readerId" required>
+    <option th:each="r : ${readers}" th:value="${r.id}" th:text="${r.fullName}"></option>
+  </select><br><br>
+
+  Книга:<br>
+  <select name="bookId" required>
+    <option th:each="b : ${books}" th:value="${b.id}" th:text="${b.title}"></option>
+  </select><br><br>
+
+  <button type="submit">Підтвердити</button>
+</form>
+<br><a href="/">⬅ Головна</a>
+</body>
+</html>

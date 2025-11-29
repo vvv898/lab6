@@ -1,0 +1,22 @@
+<!DOCTYPE html>
+<html xmlns:th="http://www.thymeleaf.org">
+<head><meta charset="UTF-8"><title>Додати книгу</title></head>
+<body>
+<h1>Додати книгу</h1>
+<form action="/book/add" method="post">
+  Назва:<br><input type="text" name="title" required><br><br>
+  Рік видання:<br><input type="number" name="yearPublished"><br><br>
+  Сторінок:<br><input type="number" name="pages"><br><br>
+  Автор:<br>
+  <select name="authorId" required>
+    <option th:each="a : ${authors}" th:value="${a.id}" th:text="${a.name}"></option>
+  </select><br><br>
+  Жанр:<br>
+  <select name="genreId" required>
+    <option th:each="g : ${genres}" th:value="${g.id}" th:text="${g.name}"></option>
+  </select><br><br>
+  <button type="submit">Додати</button>
+</form>
+<br><a href="/books">⬅ Назад</a>
+</body>
+</html>

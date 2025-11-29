@@ -1,0 +1,12 @@
+<!DOCTYPE html>
+<html xmlns:th="http://www.thymeleaf.org">
+<head><meta charset="UTF-8"><title>Читачі</title></head>
+<body>
+<h1>Читачі</h1>
+<a href="/">⬅ Головна</a> | <a href="/reader/add">Додати читача</a>
+<hr>
+<ul>
+  <li th:each="r : ${readers}" th:text="${r.fullName + ' — ' + r.phone}"></li>
+</ul>
+</body>
+</html>

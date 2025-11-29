@@ -1,0 +1,16 @@
+<!DOCTYPE html>
+<html xmlns:th="http://www.thymeleaf.org">
+<head><meta charset="UTF-8"><title>Видані книги</title></head>
+<body>
+<h1>Видані книги</h1>
+<a href="/">⬅ Головна</a>
+<hr>
+<div th:each="b : ${borrowings}">
+  <p>
+    <strong th:text="${b.book.title}"></strong>
+    — видано <span th:text="${b.reader.fullName}"></span>
+    (<span th:text="${b.borrowDate}"></span>)
+  </p>
+</div>
+</body>
+</html>

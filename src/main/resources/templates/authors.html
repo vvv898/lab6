@@ -1,0 +1,12 @@
+<!DOCTYPE html>
+<html xmlns:th="http://www.thymeleaf.org">
+<head><meta charset="UTF-8"><title>Автори</title></head>
+<body>
+<h1>Автори</h1>
+<a href="/">⬅ Головна</a> | <a href="/author/add">Додати автора</a>
+<hr>
+<ul>
+  <li th:each="a : ${authors}" th:text="${a.name + ' (' + a.country + ')'}"></li>
+</ul>
+</body>
+</html>

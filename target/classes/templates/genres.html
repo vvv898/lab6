@@ -1,0 +1,12 @@
+<!DOCTYPE html>
+<html xmlns:th="http://www.thymeleaf.org">
+<head><meta charset="UTF-8"><title>Жанри</title></head>
+<body>
+<h1>Жанри</h1>
+<a href="/">⬅ Головна</a> | <a href="/genre/add">Додати жанр</a>
+<hr>
+<ul>
+  <li th:each="g : ${genres}" th:text="${g.name}"></li>
+</ul>
+</body>
+</html>
