@@ -1,6 +1,6 @@
-# .github/workflows/deploy.yml 
+# .github/workflows/deploy.yml
 
-name: CI/CD Pipeline
+name: CI/CD Pipeline (6 Stages)
 
 on:
   push:
@@ -12,55 +12,76 @@ jobs:
     runs-on: ubuntu-latest
     
     steps:
-    - name: Checkout Code
-      uses: actions/checkout@v4
+      # =========================================================
+      # 1. ЕТАП ПІДГОТОВКИ (CHECKOUT)
+      # =========================================================
+      - name: 1. Checkout Code
+        uses: actions/checkout@v4
 
-    # 1. Складання та Тестування (CI)
-    - name: Set up JDK 17
-      uses: actions/setup-java@v4
-      with:
-        java-version: '17'
-        distribution: 'temurin'
-        cache: 'maven'
+      # =========================================================
+      # 2. ЕТАП СЕРЕДОВИЩА (ENVIRONMENT SETUP)
+      # =========================================================
+      - name: 2. Setup Java Environment
+        uses: actions/setup-java@v4
+        with:
+          java-version: '17'
+          distribution: 'temurin'
+          cache: 'maven'
 
-    - name: Build Project (Skip Tests)
-      run: |
-        # Складання JAR файлу
-        mvn clean package -DskipTests
-      
-    # 2. Деплой на EC2 (CD)
-
-    # 2.1 Копіювання файлів на EC2
-    - name: Copy files to EC2 (JAR, Docker Compose, Dockerfile)
-      uses: appleboy/scp-action@v0.1.7
-      with:
-        host: ${{ secrets.SSH_HOST }}
-        username: ${{ secrets.SSH_USER }}
-        key: ${{ secrets.SSH_PRIVATE_KEY }}
-        # Копіюємо свіжозібраний JAR, Docker Compose та Dockerfile
-        source: "target/library-0.0.1-SNAPSHOT.jar,docker-compose.yml,Dockerfile" 
-        target: "~/app/library"
-        
-    # 2.2 Запуск Docker Compose на EC2
-    - name: Deploy and Run Docker Compose
-      uses: appleboy/ssh-action@v1.0.3
-      with:
-        host: ${{ secrets.SSH_HOST }}
-        username: ${{ secrets.SSH_USER }}
-        key: ${{ secrets.SSH_PRIVATE_KEY }}
-        script: |
-          cd ~/app/library
+      # =========================================================
+      # 3. ЕТАП ЗБІРКИ (BUILD)
+      # =========================================================
+      - name: 3. Build JAR Artifact (CI)
+        run: |
+          # Складання виконуваного JAR-файлу
+          mvn clean package -DskipTests
           
-          echo "Stopping and removing previous containers..."
-          # Зупиняємо попередній запуск (ignore errors if not running)
-          docker-compose down || true
+      # =========================================================
+      # 4. ЕТАП КОПІЮВАННЯ (DEPLOYMENT ARTIFACT TRANSFER)
+      # =========================================================
+      - name: 4. Transfer Artifacts to EC2 (SCP)
+        uses: appleboy/scp-action@v0.1.7
+        with:
+          host: ${{ secrets.SSH_HOST }}
+          username: ${{ secrets.SSH_USER }}
+          key: ${{ secrets.SSH_PRIVATE_KEY }}
+          # Копіюємо свіжозібраний JAR, Docker Compose та Dockerfile
+          source: "target/library-0.0.1-SNAPSHOT.jar,docker-compose.yml,Dockerfile"
+          target: "~/app/library"
           
-          echo "Building new image on EC2 using local Dockerfile..."
-          # Перебудовуємо образ на сервері, використовуючи скопійовані файли
-          docker build -t library-app:latest .
-          
-          echo "Starting application with Docker Compose..."
-          # Запуск застосунку та MySQL у фоновому режимі
-          docker-compose up -d
-          
-          echo "Deployment complete! Application is running on port 8080."
+      # =========================================================
+      # 5. ЕТАП КОНФІГУРАЦІЇ (DOCKER IMAGE BUILD)
+      # =========================================================
+      - name: 5. Stop Old Containers and Build New Image (SSH)
+        uses: appleboy/ssh-action@v1.0.3
+        with:
+          host: ${{ secrets.SSH_HOST }}
+          username: ${{ secrets.SSH_USER }}
+          key: ${{ secrets.SSH_PRIVATE_KEY }}
+          script: |
+            cd ~/app/library
+            
+            echo "Stopping previous containers to free ports..."
+            docker-compose down || true
+            
+            echo "Building new Docker Image using fresh JAR..."
+            # Перебудовуємо образ на сервері, використовуючи скопійовані файли
+            docker build -t library-app:latest .
+            
+      # =========================================================
+      # 6. ЕТАП ЗАПУСКУ (RUN/DEPLOY)
+      # =========================================================
+      - name: 6. Run Application Containers (Deployment)
+        uses: appleboy/ssh-action@v1.0.3
+        with:
+          host: ${{ secrets.SSH_HOST }}
+          username: ${{ secrets.SSH_USER }}
+          key: ${{ secrets.SSH_PRIVATE_KEY }}
+          script: |
+            cd ~/app/library
+            
+            echo "Starting application with Docker Compose..."
+            # Запуск застосунку та MySQL у фоновому режимі
+            docker-compose up -d
+            
+            echo "Deployment complete! Application is running on port 8080."
