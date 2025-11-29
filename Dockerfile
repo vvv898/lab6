@@ -1,17 +1,26 @@
 # Dockerfile
 
-# Використовуємо офіційний образ Java 17
-FROM openjdk:17-jre-slim
+# 1. ЕТАП ЗБІРКИ (BUILDER STAGE)
+# Використовуємо надійний JDK образ для компіляції та пакування
+FROM openjdk:17-jdk-slim-bullseye AS builder 
 
-# Встановлюємо робочу директорію
 WORKDIR /app
 
 # Копіюємо зібраний JAR-файл
-# Назва файлу залежить від pom.xml: artifactId-version.jar
-# У вашому випадку це library-0.0.1-SNAPSHOT.jar
 COPY target/library-0.0.1-SNAPSHOT.jar app.jar
 
-# Визначаємо порт для запуску
+# 2. ФІНАЛЬНИЙ ЕТАП (FINAL STAGE)
+# Використовуємо мінімальний JRE образ для запуску
+FROM openjdk:17-jre-slim-bullseye 
+
+# Створення користувача 'spring'
+RUN groupadd spring && useradd spring -g spring
+USER spring
+WORKDIR /home/spring
+
+# Копіюємо зібраний JAR з етапу builder
+COPY --from=builder /app/app.jar app.jar
+
 EXPOSE 8080
 
 # Точка входу: запуск Spring Boot застосунку
