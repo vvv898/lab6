@@ -1,67 +1,147 @@
-
-# .github/workflows/deploy.yml 
-
 name: CI/CD Pipeline
 
 on:
   push:
     branches:
-      - main # Запускати при пуші в гілку main
+      - main
+      - feature/** # Запускати CI на всіх feature-гілках
+  pull_request:
+    branches:
+      - main
+
+env:
+  # Налаштування пам'яті для Maven
+  MAVEN_OPTS: -Xmx1024m 
 
 jobs:
-  build_and_deploy:
+  # 1. КРОК: Перевірка коду (Maven Validate)
+  validate_code:
+    name: 1. Validate Code
     runs-on: ubuntu-latest
-    
     steps:
-    - name: Checkout Code
-      uses: actions/checkout@v4
+      - uses: actions/checkout@v4
+      - name: Set up JDK 17
+        uses: actions/setup-java@v4
+        with:
+          distribution: 'temurin'
+          java-version: '17'
+      - name: Maven Validate
+        # Виконання: mvn clean validate
+        run: mvn -B clean validate
 
-    # 1. Складання та Тестування (CI)
-    - name: Set up JDK 17
-      uses: actions/setup-java@v4
-      with:
-        java-version: '17'
-        distribution: 'temurin'
-        cache: 'maven'
+  # 2. КРОК: Юніт-тести та звітність
+  unit_tests:
+    name: 2. Run Unit Tests & Collect Reports
+    runs-on: ubuntu-latest
+    needs: validate_code # Залежність: 1
+    steps:
+      - uses: actions/checkout@v4
+      - name: Set up JDK 17
+        uses: actions/setup-java@v4
+        with:
+          distribution: 'temurin'
+          java-version: '17'
+      - name: Run Unit Tests (Skip ITs)
+        # Виконання: mvn test -DskipITs=true
+        run: mvn -B -DskipITs=true test
+      - name: Upload Surefire Reports (Unit Tests)
+        uses: actions/upload-artifact@v4
+        with:
+          name: surefire-reports
+          path: target/surefire-reports
 
-    - name: Build Project (Skip Tests)
-      run: |
-        # Складання JAR файлу
-        mvn clean package -DskipTests
+  # 3. КРОК: Складання артефакту (JAR-файлу)
+  package_application:
+    name: 3. Package Application
+    runs-on: ubuntu-latest
+    needs: unit_tests # Залежність: 2
+    steps:
+      - uses: actions/checkout@v4
+      - name: Set up JDK 17
+        uses: actions/setup-java@v4
+        with:
+          distribution: 'temurin'
+          java-version: '17'
+      - name: Maven Package
+        # Виконання: mvn package -DskipTests
+        run: mvn -B -DskipTests package
+      - name: Upload Application JAR
+        # Збереження JAR як артефакт для кроку 5
+        uses: actions/upload-artifact@v4
+        with:
+          name: app-jar
+          path: target/*.jar
+
+  # 4. КРОК: Інтеграційні тести (з Testcontainers) та Звіт JaCoCo
+  integration_tests:
+    name: 4. Run Integration Tests (with Testcontainers)
+    runs-on: ubuntu-latest
+    needs: package_application # Залежність: 3
+    # Налаштування Docker-in-Docker для Testcontainers
+    services:
+      docker:
+        image: docker:24-dind
+        privileged: true
+        options: "--privileged --name docker"
+        ports:
+          - 2375:2375
+    env:
+      DOCKER_HOST: tcp://localhost:2375
+      DOCKER_TLS_CERTDIR: ""
+    steps:
+      - uses: actions/checkout@v4
+      - name: Wait for Docker
+        run: for i in $(seq 1 30); do docker version && break || sleep 1; done
+      - name: Set up JDK 17
+        uses: actions/setup-java@v4
+        with:
+          distribution: 'temurin'
+          java-version: '17'
+      - name: Run Integration Tests (Failsafe & JaCoCo)
+        # Виконання: mvn verify (запускає інтеграційні тести та генерує звіт JaCoCo)
+        run: mvn -B verify
+      - name: Upload Failsafe Reports (ITs)
+        uses: actions/upload-artifact@v4
+        with:
+          name: failsafe-reports
+          path: target/failsafe-reports
+      - name: Upload JaCoCo Code Coverage Report
+        # Збереження звіту про покриття коду тестами (вимога 'е')
+        uses: actions/upload-artifact@v4
+        with:
+          name: jacoco-coverage-report
+          path: target/site/jacoco
+
+  # 5. КРОК: Розгортання на віддаленому сервері (CD)
+  deploy_to_server:
+    name: 5. Deploy to remote server
+    runs-on: ubuntu-latest
+    # Залежність: від 3 та 4 (успішна збірка та успішне тестування)
+    needs: [package_application, integration_tests]
+    # УМОВА РОЗГОРТАННЯ: Тільки при пуші/злитті в основну гілку 'main' (вимога 'f')
+    if: github.ref == 'refs/heads/main'
+    steps:
+      - uses: actions/checkout@v4
+      - name: Download Application JAR
+        # Завантаження артефакту з кроку 3
+        uses: actions/download-artifact@v4
+        with:
+          name: app-jar
+          path: ./artifact
+      - name: Install SSH client
+        run: sudo apt-get update && sudo apt-get install -y openssh-client rsync
+      - name: Prepare SSH (Create private key file)
+        run: |
+          mkdir -p ~/.ssh
+          echo "${{ secrets.SSH_PRIVATE_KEY }}" > ~/.ssh/id_rsa
+          chmod 600 ~/.ssh/id_rsa
+          ssh-keyscan -H "${{ secrets.DEPLOY_HOST }}" >> ~/.ssh/known_hosts
       
-    # 2. Деплой на EC2 (CD)
-
-    # 2.1 Копіювання файлів на EC2
-    - name: Copy files to EC2 (JAR, Docker Compose, Dockerfile)
-      uses: appleboy/scp-action@v0.1.7
-      with:
-        host: ${{ secrets.SSH_HOST }}
-        username: ${{ secrets.SSH_USER }}
-        key: ${{ secrets.SSH_PRIVATE_KEY }}
-        # Копіюємо свіжозібраний JAR, Docker Compose та Dockerfile
-        source: "target/library-0.0.1-SNAPSHOT.jar,docker-compose.yml,Dockerfile" 
-        target: "~/app/library"
-        
-    # 2.2 Запуск Docker Compose на EC2
-    - name: Deploy and Run Docker Compose
-      uses: appleboy/ssh-action@v1.0.3
-      with:
-        host: ${{ secrets.SSH_HOST }}
-        username: ${{ secrets.SSH_USER }}
-        key: ${{ secrets.SSH_PRIVATE_KEY }}
-        script: |
-          cd ~/app/library
-          
-          echo "Stopping and removing previous containers..."
-          # Зупиняємо попередній запуск (ignore errors if not running)
-          docker-compose down || true
-          
-          echo "Building new image on EC2 using local Dockerfile..."
-          # Перебудовуємо образ на сервері, використовуючи скопійовані файли
-          docker build -t library-app:latest .
-          
-          echo "Starting application with Docker Compose..."
-          # Запуск застосунку та MySQL у фоновому режимі
-          docker-compose up -d
-          
-          echo "Deployment complete! Application is running on port 8080."
+      - name: Upload JAR to Server
+        # Копіювання файлу на проміжний шлях
+        run: scp -o StrictHostKeyChecking=no artifact/*.jar ${{ secrets.DEPLOY_USER}}@${{ secrets.DEPLOY_HOST}}:${{ secrets.DEPLOY_PATH }}
+      
+      - name: Move JAR and Restart Service (Fixed SSH command)
+        # Виправлена команда SSH для обробки sudo та послідовності команд
+        run: ssh -tt -o StrictHostKeyChecking=no ${{ secrets.DEPLOY_USER}}@${{ secrets.DEPLOY_HOST}} \
+        "bash -c 'sudo mv ${{ secrets.DEPLOY_PATH }}/*.jar /opt/java/webapps/library-app.jar && sudo systemctl restart library-app.service'"
